@@ -18,3 +18,6 @@ solana-client = "2.1.13"
 solana-program = "2.1.13"
 solana-sdk = "2.1.13"
 tokio = "1.37.0"
+base64 = "0.21"          # 新增，用于 decode ray_log
+bs58 = "0.4"             # 用于 Pubkey bs58 编码
+carbon-raydium-amm-v4-decoder = "0.10.0"
