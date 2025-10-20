@@ -1,86 +1,153 @@
-use std::sync::Arc;
-use tokio::sync::broadcast;
-use tokio_stream::StreamExt;
-use solana_client::nonblocking::pubsub_client::PubsubClient;
-use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_client::rpc_config::RpcTransactionLogsFilter;
-use solana_sdk::pubkey::Pubkey;
-use bincode::deserialize;
+use anyhow::Context;
+use base64::{engine::general_purpose, Engine as _};
+use byteorder::{LittleEndian, ReadBytesExt};
 use serde_json::json;
-use warp::Filter;
+use std::io::Cursor;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // 广播通道，用于推送 JSON 到 WebSocket 客户端
-    let (tx, _rx) = broadcast::channel(100);
-    let tx_ws = tx.clone();
+use serde_json::Value;
+use solana_sdk::pubkey::Pubkey;
+use std::str::FromStr;
 
-    // Warp WebSocket route
-    let ws_route = warp::path("ws")
-        .and(warp::ws())
-        .map(move |ws: warp::ws::Ws| {
-            let tx = tx_ws.clone();
-            ws.on_upgrade(move |socket| handle_ws(socket, tx))
-        });
-
-    tokio::spawn(async move {
-        warp::serve(ws_route).run(([127, 0, 0, 1], 3030)).await;
+//账户关联：
+// Instruction 数据只存参数
+// 实际操作的 token / pool / user 都在 transaction 的 accountKeys 中
+fn main() -> anyhow::Result<()> {
+    let ray_log = std::env::args().nth(2).unwrap_or_else(|| {
+        // 預設示範字串（你也可以從命令列傳入）
+        "AzWn51r/AAAAAAAAAAAAAAACAAAAAAAAADWn51r/AAAA9l8fZ/4yNACXGFdjJgAAAPVOuwAAAAAA".to_string()
     });
 
-    // Solana RPC + WebSocket
-    let raydium_program_id = Pubkey::from_str("RaydiumAMMProgramID")?;
-    let rpc_client = Arc::new(RpcClient::new("https://api.mainnet-beta.solana.com"));
+    let data_bytes = general_purpose::STANDARD.decode(&ray_log)?;
+    let mut rdr = Cursor::new(&data_bytes);
 
-    let (mut client, mut receiver) = PubsubClient::logs_subscribe(
-        "wss://api.mainnet-beta.solana.com",
-        RpcTransactionLogsFilter::Mentions(vec![raydium_program_id]),
-    )
-    .await?;
+    // 1 byte tag (u8)
+    let tag = rdr.read_u8().context("read tag failed")?;
+    // two u64 little-endian (amount_in, minimum_amount_out)
+    let amount_in = rdr
+        .read_u64::<LittleEndian>()
+        .context("read amount_in failed")?;
+    let minimum_amount_out = rdr
+        .read_u64::<LittleEndian>()
+        .context("read minimum_amount_out failed")?;
 
-    println!("Subscribed to Raydium AMM logs...");
-
-    while let Some(logs) = receiver.next().await {
-        let logs = logs?;
-
-        // 简单示例：找到 amm_id
-        if let Some(amm_id_str) = logs.value.logs.iter().find(|line| line.contains("amm_id")) {
-            // 提取 amm_id 地址
-            let amm_id = extract_pubkey(amm_id_str);
-            let account = rpc_client.get_account(&amm_id).await?;
-            let amm_info: AmmInfo = deserialize(&account.data)?;
-
-            // 生成 JSON
-            let json_data = json!(amm_info);
-
-            // 推送到 WebSocket 客户端
-            let _ = tx.send(json_data.to_string());
-        }
+    // 其餘 bytes（hex 列表）
+    let mut remaining = Vec::new();
+    while let Ok(b) = rdr.read_u8() {
+        remaining.push(format!("{:02X}", b));
     }
 
-    Ok(())
-}
+    let result = json!({
+        "tag": tag,
+        "instruction": match tag {
+            3 => "SwapBaseIn",
+            4 => "SwapBaseOut",
+            2 => "SomeOther", // 視版本而定
+            _ => "Unknown"
+        },
+        "amount_in": amount_in,
+        "minimum_amount_out": minimum_amount_out,
+        "remaining_hex": remaining.join(" ")
+    });
 
-// WebSocket 处理函数
-async fn handle_ws(ws: warp::ws::WebSocket, tx: broadcast::Sender<String>) {
-    let (mut ws_tx, mut _ws_rx) = ws.split();
-    let mut rx = tx.subscribe();
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    // ===========================================================
+    let sig = std::env::args()
+    .nth(1)
+    .unwrap_or_else(|| {
+        // 預設示範字串（你也可以從命令列傳入）
+        "5f8nKzSViJ7xDzL2j5nz8pFks9NuiWgd3eoX3teVJHNcq7kzSv3PY5Gknuzswu4eTcuNsYGGiW7oF7KansEpGNH6".to_string()
+    });
 
-    tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            let _ = ws_tx.send(warp::ws::Message::text(msg)).await;
+      // 1. 準備 JSON-RPC 請求
+      let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTransaction",
+        "params": [
+            sig,
+            {
+                "encoding": "jsonParsed",
+                "maxSupportedTransactionVersion": 0
+            }
+        ]
+    });
+        // 2. 發送 RPC 請求
+        const RPC_URL: &str = "https://api.mainnet-beta.solana.com";
+        let client = reqwest::blocking::Client::new();
+        let resp: Value = client
+            .post(RPC_URL)
+            .json(&payload)
+            .send()?
+            .json()
+            .context("RPC 回應解析失敗")?;
+    let tx = resp["result"].clone();
+    let program_ids: Vec<String> = tx["transaction"]["message"]["accountKeys"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|v| v["pubkey"].as_str().map(|s| s.to_string()))
+        .collect();
+  
+    let raydium_v4_program = Pubkey::from_str("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8")?;
+    println!("raydium_v4_programraydium_v4_programraydium_v4_program pubkey {}", raydium_v4_program);
+    let _is_raydium = program_ids.iter().any(|id| {
+        if let Ok(pubkey) = Pubkey::from_str(id) {
+            pubkey == raydium_v4_program
+        } else {
+            false
         }
     });
-}
 
-// 简单提取 Pubkey
-fn extract_pubkey(log_line: &str) -> Pubkey {
-    let parts: Vec<&str> = log_line.split_whitespace().collect();
-    for part in parts {
-        if part.len() == 44 || part.len() == 43 { // Solana pubkey 长度
-            if let Ok(pubkey) = Pubkey::from_str(part) {
-                return pubkey;
+    // 3. 抽取必要資訊
+    if tx.is_null() {
+        println!("❌ 沒找到交易，可能 signature 錯或未確認。");
+        return Ok(());
+    }
+
+
+    let is_raydium = program_ids.iter().any(|id| {
+        if let Ok(pubkey) = Pubkey::from_str(id) {
+            pubkey == raydium_v4_program
+        } else {
+            false
+        }
+    });
+    println!("🔍 Program IDs: {:?}", program_ids);
+    println!("✅ 是否 Raydium AMM v4: {}", is_raydium);
+
+    // 4. 查 log 確認指令
+    if let Some(logs) = tx["meta"]["logMessages"].as_array() {
+        for line in logs {
+            if let Some(l) = line.as_str() {
+                if l.contains("Instruction:") {
+                    println!("📜 {}", l);
+                }
+                if l.contains("src_token_amount") || l.contains("dst_token_amount") {
+                    println!("💰 {}", l);
+                }
             }
         }
     }
-    panic!("No pubkey found in log_line: {}", log_line);
+
+    // 5. pre/post token balance 變化
+    println!("\n📊 Token balance 變化：");
+    if let (Some(pre), Some(post)) =
+        (tx["meta"]["preTokenBalances"].as_array(), tx["meta"]["postTokenBalances"].as_array())
+    {
+        for (_i, (a, b)) in pre.iter().zip(post).enumerate() {
+            let owner = a["owner"].as_str().unwrap_or("");
+            let mint = a["mint"].as_str().unwrap_or("");
+            let pre_bal = a["uiTokenAmount"]["uiAmountString"].as_str().unwrap_or("?");
+            let post_bal = b["uiTokenAmount"]["uiAmountString"].as_str().unwrap_or("?");
+            if pre_bal != post_bal {
+                println!(
+                    "帳戶 {} (mint={})：{} → {}",
+                    owner, mint, pre_bal, post_bal
+                );
+            }
+        }
+    } else {
+        println!("無 pre/post token balance 資訊");
+    }
+    Ok(())
 }

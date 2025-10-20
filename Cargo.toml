@@ -18,6 +18,16 @@ solana-client = "2.1.13"
 solana-program = "2.1.13"
 solana-sdk = "2.1.13"
 tokio = "1.37.0"
+tokio-stream = "0.1"
+bincode = "1.3"
+warp = "0.3"
+futures-util = "0.3"
+borsh = "0.10"
+serde = { version = "1.0", features = ["derive"] }
 base64 = "0.21"          # 新增，用于 decode ray_log
 bs58 = "0.4"             # 用于 Pubkey bs58 编码
 carbon-raydium-amm-v4-decoder = "0.10.0"
+solana-transaction-status = "3.0.7"
+byteorder = "1.4"
+
+
