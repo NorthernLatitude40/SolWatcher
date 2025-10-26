@@ -18,6 +18,14 @@ use services::{
     pool_service::fetch_pools_info,
     serum_service::fetch_open_orders,
 };
+use listener::websocket::{
+    start_subscriber,
+    Configuration,
+};
+use dotenv::dotenv;
+mod listener; // 引入 listener 模块
+use crate::listener::utils::Logger;
+    
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -33,6 +41,13 @@ async fn main() -> Result<()> {
         .route("/api/open_orders", get(get_open_orders))
         .layer(cors);     
 
+  // 启动 WebSocket
+  tokio::spawn(async {
+    if let Err(e) = start_websocket().await {
+        eprintln!("WebSocket error: {:?}", e);
+    }
+});
+
     // 启动 HTTP 服务
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     println!("🚀 Server running on http://{}/", addr);
@@ -40,7 +55,6 @@ async fn main() -> Result<()> {
     .serve(app.into_make_service())
     .await
     .map_err(|err| anyhow::anyhow!("Server error: {}", err))?;
-
 
     Ok(())
 }
@@ -72,4 +86,16 @@ async fn get_open_orders() -> Result<Json<serde_json::Value>, (axum::http::Statu
         Ok(val) => Ok(Json(val.into())),
         Err(err) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
     }
+}
+
+async fn start_websocket() -> Result<()> {
+    dotenv().ok();
+    let config = Configuration::new(); 
+    let logger = Logger::new("Setup".to_string());
+
+    logger.log(format!("Solana RPC websocket: {:?}", config.wss_url.as_str()));
+    logger.log(format!("Solana RPC http: {:?}", config.https_url.as_str()));
+    logger.log(format!("Log instruction: {:?}", config.log_instruction.as_str()));
+
+    start_subscriber().await
 }

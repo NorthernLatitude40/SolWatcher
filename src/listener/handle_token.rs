@@ -8,7 +8,7 @@ use std::any::TypeId;
 use std::error::Error;
 use std::time::Duration;
 
-use crate::utils::Logger;
+use crate::listener::utils::Logger;
 
 #[async_recursion]
 pub async fn get_transaction(
@@ -72,7 +72,7 @@ pub fn get_instructions(json: Value) -> Vec<serde_json::Value> {
 
 pub fn get_instructions_with_program_id(json: Value, program_id: String) -> Vec<serde_json::Value> {
     let mut filtred_instuctions = Vec::new();
-
+    println!("Token0: {:?}",json);
     let instructions = get_instructions(json);
     if instructions.is_empty() {
         let logger = Logger::new(String::from("Token handler"));

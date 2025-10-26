@@ -1,77 +1,64 @@
+use solana_client::{
+    nonblocking::rpc_client::RpcClient,
+    rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
+};
+use solana_account_decoder::UiAccountEncoding;
+use solana_sdk::pubkey::Pubkey;
+use serum_dex::state::OpenOrders;
+use std::str::FromStr;
 use anyhow::Result;
-use reqwest::Client;
-use serde::Deserialize;
-use serde_json::json;
+// use crate::Value;
 use serde_json::Value;
 
-#[derive(Debug, Deserialize)]
-struct ProgramAccount {
-    pub pubkey: String,
-    pub account: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct RpcResponse {
-    pub result: Vec<ProgramAccount>,
-}
-
 pub async fn fetch_open_orders() -> Result<Value> {
-    let api_key = "375fedf5-7461-4e1b-9571-b2dbc5919d9e"; // 替换为你的 Helius API Key
-    let client = Client::new();
+    // Helius RPC 节点 + API Key
+    let helius_rpc_url = "https://mainnet.helius-rpc.com/?api-key=375fedf5-7461-4e1b-9571-b2dbc5919d9e";
+    let client = RpcClient::new(helius_rpc_url.to_string());
 
-    // Serum DEX v3 program 地址
-    let serum_program = "9xQeWvG816bUx9EP4CAbXg5rxuZHkJoHxh6vZya8Qk8n";
+    // Serum Market 地址
+    let market_pubkey = Pubkey::from_str("3Lzzft9ahF3Yr29eCWQ2L7y2j5MTaMzE3ax9szaMFnNx")?;
 
-    // 用户公钥
-    let user_pubkey = "HxQG3hBekCDshAcEwafw5x2fucmN7hJ7ay9yDGMnWeet";
+    // OpenOrders 程序 ID (Serum DEX v3)
+    let open_orders_program_id = Pubkey::from_str("9xQeWvG816bUx9EP6jL1eXJc4f3UbqY4mMKDBj2u2Wv")?;
 
-    // Helius RPC 请求
-    let body = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getProgramAccounts",
-        "params": [
-            serum_program,
-            {
-                "encoding": "jsonParsed",
-                "filters": [
-                    {
-                        "memcmp": {
-                            "offset": 32,  // Serum open orders 帐户中 user pubkey 偏移通常是 32
-                            "bytes": user_pubkey
-                        }
-                    }
-                ]
+    let filters = Some(vec![
+        RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
+            13,
+            &market_pubkey.to_bytes(), // ✅ 传入字节数组
+        )),
+    ]);
+    // ✅ 再定义 config
+    let config = RpcProgramAccountsConfig {
+        filters,
+        account_config: RpcAccountInfoConfig {
+            encoding: Some(UiAccountEncoding::Base64),
+            ..Default::default()
+        },
+        with_context: None,
+        sort_results: None,
+    };
+    
+    // 获取 Program Accounts
+    let accounts = client
+    .get_program_accounts_with_config(&open_orders_program_id, config)
+    .await?;
+
+    println!("✅ Found {} OpenOrders accounts", accounts.len());
+
+    // 遍历解析
+    for (_pubkey, account) in accounts {
+        // serum_dex 没有 `unpack()`，要手动用 bytemuck 解析
+        if let Ok(open_orders) = bytemuck::try_from_bytes::<OpenOrders>(&account.data) {
+            let orders = open_orders.orders; // ✅ 复制出来，避免引用未对齐的内存
+            let has_orders = orders.iter().any(|&x| x != 0);
+            if has_orders {
+                // ✅ 正确写法
+                let owner = open_orders.owner; // 这里会自动复制出值
+                println!("📦 User wallet: {:?}", owner);
             }
-        ]
-    });
+        }
+    }
 
-    let res = client
-        .post(format!("https://rpc.helius.xyz/?api-key={}", api_key))
-        .json(&body)
-        .send()
-        .await?;
-
-    let rpc_res: RpcResponse = res.json().await?;
-        // 格式化返回
-        let formatted: Vec<Value> = rpc_res
-        .result
-        .into_iter()
-        .map(|acc| {
-            json!({
-                "pubkey": acc.pubkey,
-                "account": acc.account
-            })
-        })
-        .collect();
-
-    println!("OpenOrders accounts for {}:", user_pubkey);
-    // for acc in rpc_res.result {
-    //     println!("- {}", acc.pubkey);
-    // }
-
-    Ok(json!({
-        "user_pubkey": user_pubkey,
-        "open_orders": formatted
-    }))
+    Ok(().into())
 }
