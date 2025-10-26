@@ -1,10 +1,11 @@
 use anyhow::Context;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde_json::Value;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
+use serde_json::json;
 
-pub fn fetch_transaction() ->  anyhow::Result<()> {
+pub async fn fetch_transaction() ->  anyhow::Result<Value> {
     let sig = std::env::args()
     .nth(1)
     .unwrap_or_else(|| {
@@ -31,8 +32,9 @@ pub fn fetch_transaction() ->  anyhow::Result<()> {
         let resp: Value = client
             .post(RPC_URL)
             .json(&payload)
-            .send()?
+            .send().await?
             .json()
+            .await
             .context("RPC 回應解析失敗")?;
     let tx = resp["result"].clone();
     let program_ids: Vec<String> = tx["transaction"]["message"]["accountKeys"]
@@ -55,7 +57,7 @@ pub fn fetch_transaction() ->  anyhow::Result<()> {
     // 3. 抽取必要資訊
     if tx.is_null() {
         println!("❌ 沒找到交易，可能 signature 錯或未確認。");
-        return Ok(());
+        return Ok(().into());
     }
     
     
@@ -103,7 +105,11 @@ pub fn fetch_transaction() ->  anyhow::Result<()> {
     } else {
         println!("無 pre/post token balance 資訊");
     }
-    Ok(())
+    
+    let result = json!({
+        "transaction": tx
+    });
+    Ok(result)
 }
 
 

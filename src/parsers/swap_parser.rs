@@ -1,10 +1,11 @@
 use base64::{engine::general_purpose, Engine as _};
 use byteorder::{LittleEndian, ReadBytesExt};
-use serde_json::json;
+use serde_json::Value;
 use std::io::Cursor;
 use anyhow::Context;
+use serde_json::json;
 
-pub  fn parse_swap_log() -> anyhow::Result<()> {
+pub async fn parse_swap_log() -> anyhow::Result<Value> {
     let ray_log = std::env::args().nth(2).unwrap_or_else(|| {
         // 預設示範字串（你也可以從命令列傳入）
         "AzWn51r/AAAAAAAAAAAAAAACAAAAAAAAADWn51r/AAAA9l8fZ/4yNACXGFdjJgAAAPVOuwAAAAAA".to_string()
@@ -44,5 +45,9 @@ pub  fn parse_swap_log() -> anyhow::Result<()> {
 
     println!("{}", serde_json::to_string_pretty(&result)?);
 
-    Ok(())
+    let result = json!({
+        "transaction": result
+    });
+
+    Ok(result)
 }
