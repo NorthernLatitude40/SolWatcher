@@ -25,7 +25,14 @@ use listener::websocket::{
 use dotenv::dotenv;
 mod listener; // 引入 listener 模块
 use crate::listener::utils::Logger;
-    
+use axum::extract::Query;
+
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct SerumPoolQuery {
+    addr: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,6 +46,8 @@ async fn main() -> Result<()> {
         .route("/api/transaction", get(get_transaction))
         .route("/api/pools_info", get(get_pools_info))
         .route("/api/open_orders", get(get_open_orders))
+        .route("/api/serum_info", get(get_serum_info))
+        .route("/api/serum_pools", get(get_serum_pools))
         .layer(cors);     
 
   // 启动 WebSocket
@@ -87,6 +96,22 @@ async fn get_open_orders() -> Result<Json<serde_json::Value>, (axum::http::Statu
         Err(err) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
     }
 }
+
+async fn get_serum_info() -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    match services::serum_service::fetch_serum_info().await {
+        Ok(val) => Ok(Json(val.into())),
+        Err(err) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
+    }
+}
+
+async fn get_serum_pools(Query(params): Query<SerumPoolQuery>) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    let addr = &params.addr;
+    match services::serum_service::fetch_serum_pool_list(addr).await {
+        Ok(val) => Ok(Json(val.into())),
+        Err(err) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
+    }
+}
+
 
 async fn start_websocket() -> Result<()> {
     dotenv().ok();

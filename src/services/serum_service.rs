@@ -11,6 +11,9 @@ use anyhow::Result;
 // use crate::Value;
 use serde_json::Value;
 
+use reqwest::Client;
+use serde_json::json;
+
 pub async fn fetch_open_orders() -> Result<Value> {
     // Helius RPC 节点 + API Key
     let helius_rpc_url = "https://mainnet.helius-rpc.com/?api-key=375fedf5-7461-4e1b-9571-b2dbc5919d9e";
@@ -61,4 +64,63 @@ pub async fn fetch_open_orders() -> Result<Value> {
     }
 
     Ok(().into())
+}
+
+
+pub async fn fetch_serum_info() -> Result<Value> {
+    let coinmarketcap_rpc_url = "https://dapi.coinmarketcap.com/dex/v1/tokens/trending/list";
+    let client = Client::new();
+   // 建立請求的 JSON body
+   let body = json!({
+    "nextPageIndex": "",
+    "interval": "24h",
+    "pageSize": 100,
+    "platformIds": "16"
+});
+let mut result = json!({}); 
+  // 發送 POST 請求
+  let response = client
+  .post(coinmarketcap_rpc_url)
+  .json(&body)
+  .send()
+  .await?;
+      // 檢查是否成功
+      if response.status().is_success() {
+        let body  = response.text().await?;
+        result = json!({
+        "transaction": body
+    });
+        println!("✅ 成功回傳資料：\n{}", body);
+    } else {
+        println!("❌ 請求失敗，狀態碼: {}", response.status());
+    }
+
+    Ok(result)
+}
+
+pub async fn fetch_serum_pool_list(addr: &str) -> Result<Value> {
+    let coinmarketcap_rpc_url = format!(
+        "https://dapi.coinmarketcap.com/dex/v1/token/pools?platform=solana&address={}",
+        addr
+    );
+    let client = Client::new();
+ 
+let mut result = json!({}); 
+  // 發送 POST 請求
+  let response = client
+  .get(coinmarketcap_rpc_url)
+  .send()
+  .await?;
+      // 檢查是否成功
+      if response.status().is_success() {
+        let body  = response.text().await?;
+        result = json!({
+        "transaction": body
+    });
+        println!("✅ 成功回傳資料：\n{}", body);
+    } else {
+        println!("❌ 請求失敗，狀態碼: {}", response.status());
+    }
+
+    Ok(result)
 }
