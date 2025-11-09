@@ -38,3 +38,5 @@ http = "0.2"
 serum_dex = { version = "0.5.4", default-features = false }
 spl-token = { version = "4.0",  default-features = false, features = ["no-entrypoint"]}
 bytemuck = "1.15"
+hex = "0.4.3"
+anchor-lang = "0.32.1"

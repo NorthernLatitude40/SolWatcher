@@ -1,12 +1,14 @@
 use anyhow::Result;
 use axum::{
-    routing::get,
+    routing::{get, post},
     Json, Router,
+    extract::Query,
+    http::StatusCode,
+    Server,
+    response::Json as JsonResponse,
 };
 use std::net::SocketAddr;
 use serde_json::Value;
-use axum::http::StatusCode;
-use axum::Server;
 use tower_http::cors::{Any, CorsLayer};
 use http::HeaderValue;
 mod parsers;
@@ -25,7 +27,6 @@ use listener::websocket::{
 use dotenv::dotenv;
 mod listener; // 引入 listener 模块
 use crate::listener::utils::Logger;
-use axum::extract::Query;
 
 use serde::Deserialize;
 
@@ -45,6 +46,8 @@ async fn main() -> Result<()> {
         .route("/api/swap_log", get(get_swap_log))
         .route("/api/transaction", get(get_transaction))
         .route("/api/pools_info", get(get_pools_info))
+        .route("/api/pool_ids", post(get_pool_ids))
+        .route("/api/solbalance_id", get(get_solbalance_id))
         .route("/api/open_orders", get(get_open_orders))
         .route("/api/serum_info", get(get_serum_info))
         .route("/api/serum_pools", get(get_serum_pools))
@@ -89,6 +92,30 @@ async fn get_pools_info() -> Result<Json<serde_json::Value>, (axum::http::Status
         Err(err) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
     }
 }
+
+#[derive(Deserialize)]
+struct PoolRequest {
+    ids: Vec<String>,
+}
+async fn get_pool_ids(Json(payload): Json<PoolRequest>) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    match services::pool_service::fetch_pool_ids(payload.ids).await {
+        Ok(val) => Ok(Json(val.into())),
+        Err(err) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
+    }
+}
+
+#[derive(Deserialize)]
+struct PoolQuery {
+    id: String, 
+}
+async fn get_solbalance_id(Query(params): Query<PoolQuery>) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    match services::pool_service::fetch_solbalance_id(params.id).await {
+        Ok(val) => Ok(Json(val.into())),
+        Err(err) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
+    }
+}
+
+
 
 async fn get_open_orders() -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
     match services::serum_service::fetch_open_orders().await {

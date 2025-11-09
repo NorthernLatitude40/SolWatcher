@@ -13,6 +13,10 @@ use serde_json::Value;
 
 use reqwest::Client;
 use serde_json::json;
+use hex;
+use crate::models::PoolState; 
+use anchor_lang::AccountDeserialize;
+
 
 pub async fn fetch_open_orders() -> Result<Value> {
     // Helius RPC 节点 + API Key
@@ -48,6 +52,37 @@ pub async fn fetch_open_orders() -> Result<Value> {
     .await?;
 
     println!("✅ Found {} OpenOrders accounts", accounts.len());
+
+    let pubkey = Pubkey::from_str("2AXXcN6oN9bBT5owwmTH53C7QHUXvhLeu718Kqt8rvY2")?;
+    let get_balance = client.get_balance(&pubkey).await?;
+    println!("✅ Found balance: {}", get_balance);
+
+    let pubkey = Pubkey::from_str("2AXXcN6oN9bBT5owwmTH53C7QHUXvhLeu718Kqt8rvY2")?;
+    let account_info = client.get_account(&pubkey).await?;
+    println!("✅ Account lamports: {}", account_info.lamports);
+    println!("✅ Account owner: {}", account_info.owner);
+    println!("✅ Data length: {}", account_info.data.len());
+    println!("✅ Full account info: {:#?}", account_info);
+    println!("data (base64): {}", base64::encode(&account_info.data));
+println!("data (hex): {}", hex::encode(&account_info.data));
+let expected = std::mem::size_of::<crate::models::pool_state::PoolState>();
+println!("== expected PoolState size = {}", expected);
+
+let data = &account_info.data[8..]; // skip Anchor discriminator
+
+if let Some(pool_state) = parse_pool_state(&data) {
+    let tick_current = pool_state.tick_current;
+    let liquidity = pool_state.liquidity;
+    let status = pool_state.status;
+    println!("✅ Pool owner: {:?}", pool_state.owner);
+    println!("✅ Token A mint: {:?}", pool_state.token_mint_0);
+    println!("✅ Token B mint: {:?}", pool_state.token_mint_1);
+    println!("✅ Liquidity: {}", liquidity);
+    println!("✅ Current tick: {}", tick_current);
+    println!("✅ Reward0 mint: {:?}", pool_state.reward_infos[0].token_mint);
+} else {
+    println!("❌ Failed to parse PoolState");
+}
 
     // 遍历解析
     for (_pubkey, account) in accounts {
@@ -123,4 +158,11 @@ let mut result = json!({});
     }
 
     Ok(result)
+}
+
+pub fn parse_pool_state(data: &[u8]) -> Option<PoolState> {
+    if data.len() < std::mem::size_of::<PoolState>() {
+        return None;
+    }
+    bytemuck::try_from_bytes::<PoolState>(data).ok().copied()
 }
