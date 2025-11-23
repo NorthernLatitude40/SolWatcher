@@ -19,6 +19,7 @@ use services::{
     transaction_service::fetch_transaction,
     pool_service::fetch_pools_info,
     serum_service::fetch_open_orders,
+    plmint_accounts_service::fetch_plmint_accounts,
 };
 use listener::websocket::{
     start_subscriber,
@@ -51,6 +52,7 @@ async fn main() -> Result<()> {
         .route("/api/open_orders", get(get_open_orders))
         .route("/api/serum_info", get(get_serum_info))
         .route("/api/serum_pools", get(get_serum_pools))
+        .route("/api/plmint_accounts", get(get_plmint_accounts))
         .layer(cors);     
 
   // 启动 WebSocket
@@ -139,6 +141,13 @@ async fn get_serum_pools(Query(params): Query<SerumPoolQuery>) -> Result<Json<se
     }
 }
 
+async fn get_plmint_accounts(Query(params): Query<SerumPoolQuery>) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    let addr = &params.addr;
+    match services::plmint_accounts_service::fetch_plmint_accounts(addr).await {
+        Ok(val) => Ok(Json(val.into())),
+        Err(err) => Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
+    }
+}
 
 async fn start_websocket() -> Result<()> {
     dotenv().ok();
